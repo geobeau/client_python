@@ -503,7 +503,11 @@ def _MultiProcessValue(_pidFunc=os.getpid):
 # and as that may be in some arbitrary library the user/admin has
 # no control over we use an environment variable.
 if 'prometheus_multiproc_dir' in os.environ:
-    _ValueClass = _MultiProcessValue()
+    if 'prometheus_multiproc_use_uwsgi_worker' in os.environ:
+        import uwsgi
+        _ValueClass = _MultiProcessValue(_pidFunc=uwsgi.worker_id)
+    else:
+        _ValueClass = _MultiProcessValue()
 else:
     _ValueClass = _MutexValue
 
