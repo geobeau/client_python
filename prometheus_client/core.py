@@ -354,6 +354,7 @@ class _MmapedDict(object):
     Not thread safe.
     """
     def __init__(self, filename, read_mode=False):
+        self.filename = filename
         self._f = open(filename, 'a+b')
         if os.fstat(self._f.fileno()).st_size == 0:
             self._f.truncate(_INITIAL_MMAP_SIZE)
@@ -369,9 +370,19 @@ class _MmapedDict(object):
             if not read_mode:
                 for key, _, pos in self._read_all_values():
                     self._positions[key] = pos
+        self.close()
+
+    def _open_file(self):
+        self._f = open(self.filename, 'a+b')
+        if os.fstat(self._f.fileno()).st_size == 0:
+            self._f.truncate(_INITIAL_MMAP_SIZE)
+        self._capacity = os.fstat(self._f.fileno()).st_size
+        self._m = mmap.mmap(self._f.fileno(), self._capacity)
+
 
     def _init_value(self, key):
         """Initialize a value. Lock must be held by caller."""
+        self._open_file()
         encoded = key.encode('utf-8')
         # Pad to be 8-byte aligned.
         padded = encoded + (b' ' * (8 - (len(encoded) + 4) % 8))
@@ -386,10 +397,11 @@ class _MmapedDict(object):
         self._used += len(value)
         _pack_integer(self._m, 0, self._used)
         self._positions[key] = self._used - 8
+        self.close()
 
     def _read_all_values(self):
         """Yield (key, value, pos). No locking is performed."""
-
+        self._open_file()
         pos = 8
 
         # cache variables to local ones and prevent attributes lookup
@@ -407,6 +419,7 @@ class _MmapedDict(object):
             value = _unpack_double(data, pos)[0]
             yield encoded.decode('utf-8'), value, pos
             pos += 8
+        self.close()
 
     def read_all_values(self):
         """Yield (key, value, pos). No locking is performed."""
@@ -418,14 +431,19 @@ class _MmapedDict(object):
             self._init_value(key)
         pos = self._positions[key]
         # We assume that reading from an 8 byte aligned value is atomic
-        return _unpack_double(self._m, pos)[0]
+        self._open_file()
+        value = _unpack_double(self._m, pos)[0]
+        self.close()
+        return value
 
     def write_value(self, key, value):
+        self._open_file()
         if key not in self._positions:
             self._init_value(key)
         pos = self._positions[key]
         # We assume that writing to an 8 byte aligned value is atomic
         _pack_double(self._m, pos, value)
+        self.close()
 
     def close(self):
         if self._f:
